@@ -1,9 +1,16 @@
 import { app } from './app.js';
 import { config } from './config.js';
+import { initDb } from './db.js';
 import { seedIfEmpty } from './seed.js';
 import { cardPaymentsEnabled, reconcilePendingPayments } from './services/payments.js';
 
-seedIfEmpty();
+try {
+  await initDb();
+  await seedIfEmpty();
+} catch (err) {
+  console.error('❌ تعذر الاتصال بقاعدة البيانات:', err.message);
+  process.exit(1);
+}
 
 if (cardPaymentsEnabled()) {
   setInterval(reconcilePendingPayments, 5 * 60 * 1000).unref();

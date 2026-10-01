@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
-import { db } from './db.js';
 import { fileURLToPath } from 'node:url';
+import { pool, one, initDb } from './db.js';
 
 const products = [
   ['سماعات لاسلكية', 'سماعات بلوتوث بعزل ضوضاء وبطارية تدوم 30 ساعة.', 1450, 25, 'إلكترونيات', 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600'],
@@ -13,27 +13,33 @@ const products = [
   ['نبتة منزلية', 'نبتة داخلية سهلة العناية مع أصيص أنيق.', 320, 20, 'المنزل', 'https://images.unsplash.com/photo-1485955900006-10f4d324d411?w=600'],
 ];
 
-export function seedIfEmpty() {
-  const { n: userCount } = db.prepare('SELECT COUNT(*) AS n FROM users').get();
+export async function seedIfEmpty() {
+  const { n: userCount } = await one('SELECT COUNT(*) AS n FROM users');
   if (!userCount) {
     const email = process.env.ADMIN_EMAIL || 'admin@store.com';
     const password = process.env.ADMIN_PASSWORD || 'admin123';
-    db.prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'admin')").run(
+    await pool.query("INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'admin')", [
       'المدير',
-      email,
-      bcrypt.hashSync(password, 10)
-    );
+      email.toLowerCase(),
+      bcrypt.hashSync(password, 10),
+    ]);
     console.log(`تم إنشاء حساب المدير: ${email} / ${password}`);
     if (!process.env.ADMIN_PASSWORD) console.log('⚠️  غيّر كلمة مرور المدير من صفحة "حسابي" بعد تسجيل الدخول');
   }
-  const { n: productCount } = db.prepare('SELECT COUNT(*) AS n FROM products').get();
+  const { n: productCount } = await one('SELECT COUNT(*) AS n FROM products');
   if (!productCount) {
-    const insert = db.prepare(
-      'INSERT INTO products (name, description, price, stock, category, image_url) VALUES (?, ?, ?, ?, ?, ?)'
-    );
-    for (const p of products) insert.run(...p);
+    for (const p of products) {
+      await pool.query(
+        'INSERT INTO products (name, description, price, stock, category, image_url) VALUES ($1, $2, $3, $4, $5, $6)',
+        p
+      );
+    }
     console.log(`تمت إضافة ${products.length} منتجات تجريبية`);
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) seedIfEmpty();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  await initDb();
+  await seedIfEmpty();
+  await pool.end();
+}
