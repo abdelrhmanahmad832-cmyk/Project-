@@ -1,5 +1,7 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
+import { useEffect } from 'react';
 import Navbar from './components/Navbar.jsx';
+import Footer from './components/Footer.jsx';
 import Home from './pages/Home.jsx';
 import ProductPage from './pages/ProductPage.jsx';
 import Cart from './pages/Cart.jsx';
@@ -11,24 +13,42 @@ import OrderDetail from './pages/OrderDetail.jsx';
 import Profile from './pages/Profile.jsx';
 import Admin from './pages/Admin.jsx';
 import { useAuth } from './context/AuthContext.jsx';
-import { useConfig } from './context/ConfigContext.jsx';
 
 function Protected({ children, admin = false }) {
   const { user, loading, loggedOut } = useAuth();
   const location = useLocation();
-  if (loading) return <p className="center muted">جارٍ التحميل...</p>;
+  if (loading) return <div className="skeleton" style={{ height: 320 }} />;
   if (!user && loggedOut) return <Navigate to="/" replace />;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   if (admin && user.role !== 'admin') return <Navigate to="/" replace />;
   return children;
 }
 
+function NotFound() {
+  return (
+    <div className="not-found">
+      <div className="big num">404</div>
+      <h1>الصفحة غير موجودة</h1>
+      <p>ربما تغيّر الرابط أو حُذفت الصفحة.</p>
+      <Link to="/" className="btn">العودة إلى المتجر</Link>
+    </div>
+  );
+}
+
+// New page, new scroll position (keeps back/forward restoration for same-path query changes).
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => window.scrollTo(0, 0), [pathname]);
+  return null;
+}
+
 export default function App() {
-  const { storeName } = useConfig();
   return (
     <>
+      <a href="#main" className="skip-link">تخطَّ إلى المحتوى</a>
+      <ScrollToTop />
       <Navbar />
-      <main className="container">
+      <main id="main" className="container">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/products/:id" element={<ProductPage />} />
@@ -40,10 +60,10 @@ export default function App() {
           <Route path="/admin" element={<Protected admin><Admin /></Protected>} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="*" element={<p className="center muted">الصفحة غير موجودة</p>} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
-      <footer className="footer">© {new Date().getFullYear()} {storeName} — جميع الحقوق محفوظة</footer>
+      <Footer />
     </>
   );
 }

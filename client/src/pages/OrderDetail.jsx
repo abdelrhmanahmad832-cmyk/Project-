@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowRight, Check, CreditCard } from '@phosphor-icons/react';
 import {
   api, formatPrice, formatDate, STATUS_LABELS, PAYMENT_STATUS_LABELS, PAYMENT_METHOD_LABELS,
 } from '../api.js';
 import { useToast } from '../context/ToastContext.jsx';
+import Notice from '../components/Notice.jsx';
 
 const STEPS = ['pending', 'processing', 'shipped', 'delivered'];
 
@@ -56,75 +58,87 @@ export default function OrderDetail() {
     setBusy(true);
     try {
       setOrder(await api(`/orders/${id}/cancel`, { method: 'POST' }));
-      toast('تم إلغاء الطلب');
+      toast('أُلغي الطلب');
     } catch (e) {
       toast(e.message, 'error');
     }
     setBusy(false);
   };
 
-  if (error) return <p className="alert">{error}</p>;
-  if (!order) return <p className="center muted">{returnedFromStripe ? 'جارٍ تأكيد الدفع...' : 'جارٍ التحميل...'}</p>;
+  if (error) return <Notice type="error">{error}</Notice>;
+  if (!order) {
+    return returnedFromStripe ? <p className="muted">جارٍ تأكيد الدفع…</p> : <div className="skeleton" style={{ height: 360 }} />;
+  }
 
   const unpaidCard = order.payment_method === 'card' && order.payment_status === 'unpaid' && order.status !== 'cancelled';
   const stepIndex = STEPS.indexOf(order.status);
 
   return (
     <>
-      <Link to="/orders" className="muted">→ كل طلباتي</Link>
-      {location.state?.placed && <p className="success">تم استلام طلبك بنجاح! 🎉 سنتواصل معك قريباً.</p>}
-      {returnedFromStripe && order.payment_status === 'paid' && <p className="success">تم الدفع بنجاح، شكراً لك! 🎉</p>}
-      {returnedFromStripe && unpaidCard && <p className="info">لم يتم تأكيد الدفع بعد. إذا تم خصم المبلغ ستتحدث الحالة خلال دقائق.</p>}
-      {canceledPayment && unpaidCard && <p className="alert">لم تكتمل عملية الدفع. يمكنك المحاولة مرة أخرى.</p>}
+      <Link to="/orders" className="back-link"><ArrowRight size={16} /> كل طلباتي</Link>
+      <div className="stack" style={{ marginBottom: 20 }}>
+        {location.state?.placed && <Notice type="success">استلمنا طلبك وسنبدأ تجهيزه قريباً.</Notice>}
+        {returnedFromStripe && order.payment_status === 'paid' && <Notice type="success">تم الدفع. شكراً لك.</Notice>}
+        {returnedFromStripe && unpaidCard && <Notice type="info">لم يُؤكَّد الدفع بعد. إذا خُصم المبلغ ستتحدث الحالة خلال دقائق.</Notice>}
+        {canceledPayment && unpaidCard && <Notice type="error">لم تكتمل عملية الدفع. يمكنك المحاولة مرة أخرى.</Notice>}
+      </div>
 
-      <div className="card pad">
-        <div className="order-head">
-          <h2>طلب #{order.id}</h2>
-          <span className={`status status-${order.status}`}>{STATUS_LABELS[order.status]}</span>
-          <span className="muted small">{formatDate(order.created_at)}</span>
+      <div className="page-head">
+        <div>
+          <h1 className="num">طلب #{order.id}</h1>
+          <p>{formatDate(order.created_at)}</p>
         </div>
+        <div className="row">
+          {unpaidCard && <button className="btn btn-accent" disabled={busy} onClick={payNow}><CreditCard size={18} /> ادفع الآن</button>}
+          {order.status === 'pending' && <button className="btn btn-danger" disabled={busy} onClick={cancel}>إلغاء الطلب</button>}
+        </div>
+      </div>
 
-        {order.status !== 'cancelled' && (
-          <ol className="progress">
-            {STEPS.map((s, i) => <li key={s} className={i <= stepIndex ? 'done' : ''}>{STATUS_LABELS[s]}</li>)}
+      <div className="panel">
+        {order.status === 'cancelled' ? (
+          <p style={{ marginBottom: 20 }}><span className="badge st-cancelled">ملغي</span></p>
+        ) : (
+          <ol className="timeline" aria-label="حالة الطلب">
+            {STEPS.map((s, i) => (
+              <li key={s} className={i <= stepIndex ? 'done' : ''} aria-current={i === stepIndex ? 'step' : undefined}>
+                <span className="dot">{i <= stepIndex ? <Check size={14} weight="bold" /> : <span className="num small">{i + 1}</span>}</span>
+                {STATUS_LABELS[s]}
+              </li>
+            ))}
           </ol>
         )}
 
-        <table className="table">
-          <thead><tr><th>المنتج</th><th>السعر</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
-          <tbody>
-            {order.items.map((i) => (
-              <tr key={i.id}>
-                <td>{i.product_id ? <Link to={`/products/${i.product_id}`}>{i.product_name}</Link> : i.product_name}</td>
-                <td>{formatPrice(i.unit_price)}</td>
-                <td>{i.quantity}</td>
-                <td>{formatPrice(i.unit_price * i.quantity)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <ul className="line-items">
+          {order.items.map((i) => (
+            <li key={i.id} className="summary-line" style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
+              <span>
+                {i.product_id ? <Link to={`/products/${i.product_id}`} className="link">{i.product_name}</Link> : i.product_name}
+                <span className="muted num"> × {i.quantity}</span>
+              </span>
+              <span>{formatPrice(i.unit_price * i.quantity)}</span>
+            </li>
+          ))}
+        </ul>
 
-        <div className="order-grid">
+        <div className="info-grid" style={{ marginTop: 28 }}>
           <div>
-            <h3>التوصيل</h3>
+            <h3>التوصيل إلى</h3>
             <p className="pre-line">{order.address}</p>
-            <p dir="ltr" className="text-start">{order.phone}</p>
+            <p className="muted"><span dir="ltr">{order.phone}</span></p>
           </div>
           <div>
             <h3>الدفع</h3>
-            <p>{PAYMENT_METHOD_LABELS[order.payment_method]} — <span className={`status pay-${order.payment_status}`}>{PAYMENT_STATUS_LABELS[order.payment_status]}</span></p>
+            <p className="row" style={{ marginBottom: 10 }}>
+              {PAYMENT_METHOD_LABELS[order.payment_method]}
+              <span className={`badge pay-${order.payment_status}`}>{PAYMENT_STATUS_LABELS[order.payment_status]}</span>
+            </p>
             <div className="summary-line"><span>المجموع الفرعي</span><span>{formatPrice(order.subtotal ?? order.total)}</span></div>
-            {order.discount > 0 && <div className="summary-line success-text"><span>خصم ({order.coupon_code})</span><span>−{formatPrice(order.discount)}</span></div>}
+            {order.discount > 0 && <div className="summary-line discount"><span>خصم {order.coupon_code}</span><span>−{formatPrice(order.discount)}</span></div>}
             <div className="summary-line"><span>الشحن</span><span>{order.shipping ? formatPrice(order.shipping) : 'مجاني'}</span></div>
-            <div className="summary-line total"><strong>الإجمالي</strong><strong>{formatPrice(order.total)}</strong></div>
+            <div className="summary-line total"><span>الإجمالي</span><span>{formatPrice(order.total)}</span></div>
           </div>
         </div>
-
-        <div className="row">
-          {unpaidCard && <button className="btn" disabled={busy} onClick={payNow}>💳 ادفع الآن</button>}
-          {order.status === 'pending' && <button className="btn btn-ghost danger-text" disabled={busy} onClick={cancel}>إلغاء الطلب</button>}
-        </div>
-        {order.status === 'delivered' && <p className="muted">أعجبك طلبك؟ قيّم المنتجات من صفحة كل منتج ⭐</p>}
+        {order.status === 'delivered' && <p className="muted" style={{ marginTop: 20 }}>هل أعجبك ما طلبت؟ يمكنك تقييم المنتجات من صفحة كل منتج.</p>}
       </div>
     </>
   );

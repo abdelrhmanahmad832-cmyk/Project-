@@ -23,8 +23,8 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         'img-src': ["'self'", 'data:', 'blob:', 'https:'],
-        'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        'font-src': ["'self'", 'https://fonts.gstatic.com'],
+        'style-src': ["'self'", "'unsafe-inline'"],
+        'font-src': ["'self'", 'data:'],
         'upgrade-insecure-requests': null,
       },
     },

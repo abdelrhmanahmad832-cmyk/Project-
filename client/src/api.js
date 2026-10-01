@@ -33,10 +33,13 @@ export const formatPrice = (n) =>
 
 export const formatDate = (s) => new Date(s).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' });
 
+// Neutral "no image" tile (a drawn bag outline) — works offline and in both themes.
 export const PLACEHOLDER_IMG =
   'data:image/svg+xml,' +
   encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 450"><rect width="600" height="450" fill="#e5e7eb"/><text x="300" y="250" font-size="90" text-anchor="middle">🛍️</text></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500"><rect width="400" height="500" fill="#e6e6e3"/>' +
+      '<g fill="none" stroke="#b3b1ac" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M140 210h120l-10 110a14 14 0 0 1-14 13h-72a14 14 0 0 1-14-13z"/><path d="M168 210v-14a32 32 0 0 1 64 0v14"/></g></svg>'
   );
 
 export const STATUS_LABELS = {

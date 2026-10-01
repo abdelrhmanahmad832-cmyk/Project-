@@ -1,12 +1,16 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { Truck, Money, ShieldCheck, Handbag, CaretLeft, Trash } from '@phosphor-icons/react';
 import { api, formatPrice, formatDate, PLACEHOLDER_IMG } from '../api.js';
 import { useCart } from '../context/CartContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
+import { useConfig } from '../context/ConfigContext.jsx';
 import Stars from '../components/Stars.jsx';
+import Stepper from '../components/Stepper.jsx';
+import Notice from '../components/Notice.jsx';
 
-function Reviews({ productId, onChange }) {
+function Reviews({ product, onChange }) {
   const { user } = useAuth();
   const toast = useToast();
   const [reviews, setReviews] = useState([]);
@@ -14,7 +18,7 @@ function Reviews({ productId, onChange }) {
   const [comment, setComment] = useState('');
   const [error, setError] = useState('');
 
-  const load = useCallback(() => api(`/products/${productId}/reviews`).then(setReviews).catch(() => {}), [productId]);
+  const load = useCallback(() => api(`/products/${product.id}/reviews`).then(setReviews).catch(() => {}), [product.id]);
   useEffect(() => { load(); }, [load]);
 
   const mine = user && reviews.find((r) => r.user_id === user.id);
@@ -24,11 +28,11 @@ function Reviews({ productId, onChange }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!rating) return setError('اختر عدد النجوم');
+    if (!rating) return setError('اختر عدد النجوم أولاً.');
     setError('');
     try {
-      await api(`/products/${productId}/reviews`, { method: 'POST', body: { rating, comment } });
-      toast('شكراً لتقييمك!');
+      await api(`/products/${product.id}/reviews`, { method: 'POST', body: { rating, comment } });
+      toast(mine ? 'حُفظ تعديل تقييمك' : 'شكراً لتقييمك');
       load();
       onChange();
     } catch (err) {
@@ -37,7 +41,7 @@ function Reviews({ productId, onChange }) {
   };
 
   const remove = async (id) => {
-    await api(`/products/${productId}/reviews/${id}`, { method: 'DELETE' });
+    await api(`/products/${product.id}/reviews/${id}`, { method: 'DELETE' });
     setRating(0);
     setComment('');
     load();
@@ -45,33 +49,46 @@ function Reviews({ productId, onChange }) {
   };
 
   return (
-    <section className="card pad reviews">
-      <h2>آراء العملاء</h2>
-      {user ? (
-        <form className="form review-form" onSubmit={submit}>
-          <strong>{mine ? 'عدّل تقييمك' : 'قيّم هذا المنتج'}</strong>
-          <Stars value={rating} onChange={setRating} size="1.6rem" />
-          <textarea className="input" placeholder="اكتب رأيك (اختياري)" maxLength={1000} value={comment} onChange={(e) => setComment(e.target.value)} />
-          {error && <p className="alert">{error}</p>}
-          <button className="btn">{mine ? 'حفظ التعديل' : 'إرسال التقييم'}</button>
-        </form>
-      ) : (
-        <p className="muted"><Link to="/login">سجّل الدخول</Link> لتقييم المنتجات التي اشتريتها.</p>
-      )}
-      {!reviews.length && <p className="muted">لا توجد تقييمات بعد.</p>}
-      {reviews.map((r) => (
-        <div key={r.id} className="review">
-          <div className="row">
-            <strong>{r.user_name}</strong>
-            <Stars value={r.rating} />
-            <span className="muted small">{formatDate(r.created_at)}</span>
-            {(user?.id === r.user_id || user?.role === 'admin') && (
-              <button className="link-btn danger-text" onClick={() => remove(r.id)}>حذف</button>
-            )}
+    <section className="reviews" aria-labelledby="reviews-title">
+      <div>
+        <h2 id="reviews-title">آراء العملاء</h2>
+        {product.review_count > 0 ? (
+          <div className="rating-summary">
+            <strong>{product.avg_rating}</strong>
+            <div><Stars value={product.avg_rating} /><div className="muted small num">{product.review_count} تقييم</div></div>
           </div>
-          {r.comment && <p>{r.comment}</p>}
-        </div>
-      ))}
+        ) : (
+          <p className="muted" style={{ margin: '12px 0 20px' }}>لا توجد تقييمات بعد.</p>
+        )}
+        {user ? (
+          <form className="stack" onSubmit={submit}>
+            <span className="label">{mine ? 'عدّل تقييمك' : 'قيّم المنتج'}</span>
+            <Stars value={rating} onChange={setRating} size={26} />
+            <textarea className="input" placeholder="ما رأيك في المنتج؟ (اختياري)" maxLength={1000} value={comment} onChange={(e) => setComment(e.target.value)} />
+            {error && <Notice type="error">{error}</Notice>}
+            <button className="btn">{mine ? 'حفظ التعديل' : 'نشر التقييم'}</button>
+          </form>
+        ) : (
+          <p className="muted"><Link to="/login">سجّل الدخول</Link> لتقييم المنتجات التي اشتريتها.</p>
+        )}
+      </div>
+      <div className="review-list">
+        {reviews.map((r) => (
+          <article key={r.id} className="review">
+            <div className="review-head">
+              <strong>{r.user_name}</strong>
+              <Stars value={r.rating} size={14} />
+              <span className="muted small">{formatDate(r.created_at)}</span>
+              {(user?.id === r.user_id || user?.role === 'admin') && (
+                <button className="icon-btn danger" onClick={() => remove(r.id)} aria-label="حذف التقييم" style={{ marginInlineStart: 'auto' }}>
+                  <Trash size={18} />
+                </button>
+              )}
+            </div>
+            {r.comment && <p>{r.comment}</p>}
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
@@ -79,6 +96,7 @@ function Reviews({ productId, onChange }) {
 export default function ProductPage() {
   const { id } = useParams();
   const { add, items } = useCart();
+  const { freeShippingMin, cardPayments } = useConfig();
   const toast = useToast();
   const [product, setProduct] = useState(null);
   const [qty, setQty] = useState(1);
@@ -87,41 +105,60 @@ export default function ProductPage() {
   const load = useCallback(() => api(`/products/${id}`).then(setProduct).catch((e) => setError(e.message)), [id]);
   useEffect(() => { load(); }, [load]);
 
-  if (error) return <p className="alert">{error}</p>;
-  if (!product) return <p className="center muted">جارٍ التحميل...</p>;
+  if (error) return <Notice type="error">{error}</Notice>;
+  if (!product) {
+    return (
+      <div className="pdp" aria-busy="true">
+        <div className="skeleton" style={{ aspectRatio: '4 / 5' }} />
+        <div className="stack"><div className="skeleton" style={{ height: 48 }} /><div className="skeleton" style={{ height: 120 }} /></div>
+      </div>
+    );
+  }
 
   const inCart = items.find((i) => i.id === product.id)?.quantity || 0;
   const available = product.stock - inCart;
+  const low = product.stock > 0 && product.stock <= 3;
 
   return (
     <>
-      <div className="product-detail card">
-        <img src={product.image_url || PLACEHOLDER_IMG} alt={product.name} />
-        <div className="detail-body">
-          <Link to="/" className="muted">→ العودة للمنتجات</Link>
-          <span className="chip">{product.category}</span>
+      <div className="pdp">
+        <div className="pdp-media">
+          <img src={product.image_url || PLACEHOLDER_IMG} alt={product.name} />
+        </div>
+        <div className="pdp-info">
+          <nav className="crumbs" aria-label="المسار">
+            <Link to="/">المنتجات</Link>
+            <CaretLeft size={12} />
+            <Link to={`/?category=${encodeURIComponent(product.category)}`}>{product.category}</Link>
+          </nav>
           <h1>{product.name}</h1>
-          {product.review_count > 0 && <Stars value={product.avg_rating} count={product.review_count} />}
-          <p className="price big">{formatPrice(product.price)}</p>
-          <p className="pre-line">{product.description}</p>
-          <p className={product.stock > 0 && product.stock <= 3 ? 'danger-text' : 'muted'}>
-            {product.stock <= 0 ? 'نفد المخزون' : product.stock <= 3 ? `متبقي ${product.stock} فقط!` : `متوفر: ${product.stock} قطعة`}
+          {product.review_count > 0 && (
+            <a href="#reviews-title"><Stars value={product.avg_rating} count={product.review_count} /></a>
+          )}
+          <p className="pdp-price">{formatPrice(product.price)}</p>
+          {product.description && <p className="pdp-desc pre-line">{product.description}</p>}
+          <p className={`stock-note ${low ? 'low' : ''}`}>
+            {product.stock <= 0 ? 'نفد المخزون حالياً' : low ? `متبقٍ ${product.stock} قطع فقط` : 'متوفر'}
+            {inCart > 0 && ` · ${inCart} في سلتك`}
           </p>
           {available > 0 ? (
-            <div className="row">
-              <input
-                type="number" className="input qty" min="1" max={available} value={qty} aria-label="الكمية"
-                onChange={(e) => setQty(Math.max(1, Math.min(available, Number(e.target.value) || 1)))}
-              />
-              <button className="btn" onClick={() => { add(product, qty); setQty(1); toast('تمت الإضافة للسلة ✓'); }}>أضف للسلة</button>
-              {inCart > 0 && <Link to="/cart" className="btn btn-ghost">في السلة ({inCart})</Link>}
+            <div className="buy-row">
+              <Stepper value={Math.min(qty, available)} max={available} onChange={setQty} />
+              <button className="btn btn-accent btn-lg" onClick={() => { add(product, Math.min(qty, available)); setQty(1); toast('أُضيف إلى السلة'); }}>
+                <Handbag size={20} /> أضف إلى السلة
+              </button>
             </div>
           ) : (
-            product.stock > 0 && <Link to="/cart" className="btn btn-ghost">كل الكمية المتاحة في سلتك</Link>
+            product.stock > 0 && <Link to="/cart" className="btn btn-ghost btn-lg">كل الكمية المتاحة في سلتك</Link>
           )}
+          <ul className="assurances">
+            {freeShippingMin > 0 && <li><Truck size={20} /> شحن مجاني للطلبات فوق {formatPrice(freeShippingMin)}</li>}
+            <li><Money size={20} /> الدفع نقداً عند الاستلام</li>
+            {cardPayments && <li><ShieldCheck size={20} /> أو ادفع بالبطاقة بأمان عبر Stripe</li>}
+          </ul>
         </div>
       </div>
-      <Reviews productId={product.id} onChange={load} />
+      <Reviews product={product} onChange={load} />
     </>
   );
 }

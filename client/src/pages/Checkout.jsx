@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { api, formatPrice } from '../api.js';
+import { CreditCard, Money, Lock } from '@phosphor-icons/react';
+import { api, formatPrice, PLACEHOLDER_IMG } from '../api.js';
 import { useCart } from '../context/CartContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useConfig } from '../context/ConfigContext.jsx';
+import Notice from '../components/Notice.jsx';
+import Empty from '../components/Empty.jsx';
 
 export default function Checkout() {
   const { items, clear } = useCart();
@@ -35,7 +38,9 @@ export default function Checkout() {
     if (cardPayments) setPaymentMethod('card');
   }, [cardPayments]);
 
-  if (!items.length) return <p className="center muted">السلة فارغة. <Link to="/">تصفح المنتجات</Link></p>;
+  if (!items.length && !submitting) {
+    return <Empty title="لا يوجد ما تدفع ثمنه" action={<Link to="/" className="btn">تصفّح المنتجات</Link>}>سلتك فارغة.</Empty>;
+  }
 
   const submit = async (e) => {
     e.preventDefault();
@@ -49,11 +54,12 @@ export default function Checkout() {
         method: 'POST',
         body: { address, phone, items: lines, paymentMethod, couponCode: quote?.couponCode || undefined },
       });
-      clear();
       if (checkoutUrl) {
+        clear();
         window.location.assign(checkoutUrl);
         return;
       }
+      clear();
       navigate(`/orders/${order.id}`, { state: { placed: true } });
     } catch (err) {
       setError(err.message);
@@ -62,62 +68,84 @@ export default function Checkout() {
   };
 
   return (
-    <div className="checkout">
-      <form className="card pad form" onSubmit={submit}>
-        <h2>بيانات التوصيل</h2>
-        <label>العنوان<textarea className="input" required value={address} onChange={(e) => setAddress(e.target.value)} /></label>
-        <label>رقم الهاتف<input className="input" type="tel" dir="ltr" required value={phone} onChange={(e) => setPhone(e.target.value)} /></label>
-        <label className="check"><input type="checkbox" checked={saveInfo} onChange={(e) => setSaveInfo(e.target.checked)} /> احفظ العنوان ورقم الهاتف لطلباتي القادمة</label>
+    <>
+      <div className="page-head"><h1>إتمام الطلب</h1></div>
+      <form className="split" onSubmit={submit}>
+        <div className="panel">
+          <section className="form-section">
+            <h2>عنوان التوصيل</h2>
+            <div className="form-grid">
+              <label className="field span-2"><span>العنوان بالتفصيل</span>
+                <textarea className="input" required autoComplete="street-address" placeholder="المدينة، الحي، الشارع، رقم المبنى" value={address} onChange={(e) => setAddress(e.target.value)} />
+              </label>
+              <label className="field"><span>رقم الهاتف</span>
+                <input className="input" type="tel" dir="ltr" required autoComplete="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </label>
+              <label className="check span-2"><input type="checkbox" checked={saveInfo} onChange={(e) => setSaveInfo(e.target.checked)} /> احفظ العنوان ورقم الهاتف للطلبات القادمة</label>
+            </div>
+          </section>
 
-        <h3>طريقة الدفع</h3>
-        <div className="pay-options">
-          {cardPayments && (
-            <label className={`pay-option ${paymentMethod === 'card' ? 'selected' : ''}`}>
-              <input type="radio" name="pay" value="card" checked={paymentMethod === 'card'} onChange={() => setPaymentMethod('card')} />
-              <span>💳 بطاقة ائتمان / خصم<small className="muted">دفع آمن عبر Stripe</small></span>
-            </label>
-          )}
-          <label className={`pay-option ${paymentMethod === 'cod' ? 'selected' : ''}`}>
-            <input type="radio" name="pay" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} />
-            <span>💵 الدفع عند الاستلام<small className="muted">ادفع نقداً عند وصول طلبك</small></span>
-          </label>
+          <section className="form-section">
+            <h2>طريقة الدفع</h2>
+            <div className="pay-options" role="radiogroup" aria-label="طريقة الدفع">
+              {cardPayments && (
+                <label className="pay-option">
+                  <input type="radio" name="pay" value="card" checked={paymentMethod === 'card'} onChange={() => setPaymentMethod('card')} />
+                  <span className="pay-icon"><CreditCard size={22} /></span>
+                  <div><strong>بطاقة ائتمان أو خصم</strong><small>تُحوَّل إلى صفحة دفع Stripe الآمنة</small></div>
+                </label>
+              )}
+              <label className="pay-option">
+                <input type="radio" name="pay" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} />
+                <span className="pay-icon"><Money size={22} /></span>
+                <div><strong>الدفع عند الاستلام</strong><small>ادفع نقداً عند وصول الطلب</small></div>
+              </label>
+            </div>
+          </section>
         </div>
 
-        {error && <p className="alert">{error}</p>}
-        <button className="btn btn-lg" disabled={submitting || !quote}>
-          {submitting ? 'جارٍ المعالجة...' : paymentMethod === 'card' ? `ادفع ${quote ? formatPrice(quote.total) : ''}` : 'تأكيد الطلب'}
-        </button>
-      </form>
-
-      <aside className="card pad">
-        <h3>ملخص الطلب</h3>
-        {items.map((i) => (
-          <div key={i.id} className="summary-line"><span>{i.name} × {i.quantity}</span><span>{formatPrice(i.price * i.quantity)}</span></div>
-        ))}
-        <hr />
-        <form className="row coupon-row" onSubmit={(e) => { e.preventDefault(); setCoupon(couponInput.trim()); }}>
-          <input className="input" placeholder="كود الخصم" dir="ltr" value={couponInput} onChange={(e) => setCouponInput(e.target.value)} />
-          <button className="btn btn-ghost" disabled={!couponInput.trim()}>تطبيق</button>
-        </form>
-        {quote?.couponError && <p className="alert small">{quote.couponError}</p>}
-        {quote && (
-          <>
-            <div className="summary-line"><span>المجموع الفرعي</span><span>{formatPrice(quote.subtotal)}</span></div>
-            {quote.discount > 0 && (
-              <div className="summary-line success-text">
-                <span>
-                  خصم ({quote.couponCode})
-                  <button type="button" className="link-btn" onClick={() => { setCoupon(''); setCouponInput(''); }}>إزالة</button>
-                </span>
-                <span>−{formatPrice(quote.discount)}</span>
+        <aside className="panel aside-sticky">
+          <h2 className="panel-title">ملخص الطلب</h2>
+          <div className="summary-items">
+            {items.map((i) => (
+              <div key={i.id} className="summary-item">
+                <img src={i.image_url || PLACEHOLDER_IMG} alt="" />
+                <div><div>{i.name}</div><div className="qty num">× {i.quantity}</div></div>
+                <span className="num">{formatPrice(i.price * i.quantity)}</span>
               </div>
-            )}
-            <div className="summary-line"><span>الشحن</span><span>{quote.shipping ? formatPrice(quote.shipping) : 'مجاني'}</span></div>
-            <hr />
-            <div className="summary-line total"><strong>الإجمالي</strong><strong>{formatPrice(quote.total)}</strong></div>
-          </>
-        )}
-      </aside>
-    </div>
+            ))}
+          </div>
+          <hr />
+          <div className="coupon-row">
+            <label className="visually-hidden" htmlFor="coupon">كود الخصم</label>
+            <input id="coupon" className="input" placeholder="كود الخصم" dir="ltr" value={couponInput}
+              onChange={(e) => setCouponInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setCoupon(couponInput.trim()); } }} />
+            <button type="button" className="btn btn-ghost" disabled={!couponInput.trim()} onClick={() => setCoupon(couponInput.trim())}>تطبيق</button>
+          </div>
+          {quote?.couponError && <div style={{ marginTop: 10 }}><Notice type="error">{quote.couponError}</Notice></div>}
+          <hr />
+          {quote ? (
+            <>
+              <div className="summary-line"><span>المجموع الفرعي</span><span>{formatPrice(quote.subtotal)}</span></div>
+              {quote.discount > 0 && (
+                <div className="summary-line discount">
+                  <span>خصم {quote.couponCode} <button type="button" className="link-btn" onClick={() => { setCoupon(''); setCouponInput(''); }}>إزالة</button></span>
+                  <span>−{formatPrice(quote.discount)}</span>
+                </div>
+              )}
+              <div className="summary-line"><span>الشحن</span><span>{quote.shipping ? formatPrice(quote.shipping) : 'مجاني'}</span></div>
+              <div className="summary-line total"><span>الإجمالي</span><span>{formatPrice(quote.total)}</span></div>
+            </>
+          ) : (
+            <div className="skeleton" style={{ height: 96 }} />
+          )}
+          {error && <div style={{ marginTop: 12 }}><Notice type="error">{error}</Notice></div>}
+          <button className="btn btn-accent btn-lg btn-block" style={{ marginTop: 18 }} disabled={submitting || !quote}>
+            {submitting ? 'جارٍ المعالجة…' : paymentMethod === 'card' ? <><Lock size={18} /> ادفع {quote ? formatPrice(quote.total) : ''}</> : 'تأكيد الطلب'}
+          </button>
+        </aside>
+      </form>
+    </>
   );
 }
