@@ -35,8 +35,19 @@ export function CartProvider({ children }) {
       quantity <= 0 ? prev.filter((i) => i.id !== id) : prev.map((i) => (i.id === id ? { ...i, quantity } : i))
     );
 
+  // Refresh prices/stock from the server; drops products that no longer exist.
+  const sync = (products) =>
+    setItems((prev) =>
+      prev.flatMap((i) => {
+        const p = products.find((x) => x.id === i.id);
+        if (!p || p.stock <= 0) return [];
+        return [{ ...i, name: p.name, price: p.price, image_url: p.image_url, stock: p.stock, quantity: Math.min(i.quantity, p.stock) }];
+      })
+    );
+
   const value = {
     items,
+    sync,
     add,
     update,
     remove: (id) => update(id, 0),

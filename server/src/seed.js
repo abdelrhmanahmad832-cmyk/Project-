@@ -24,6 +24,7 @@ export function seedIfEmpty() {
       bcrypt.hashSync(password, 10)
     );
     console.log(`تم إنشاء حساب المدير: ${email} / ${password}`);
+    if (!process.env.ADMIN_PASSWORD) console.log('⚠️  غيّر كلمة مرور المدير من صفحة "حسابي" بعد تسجيل الدخول');
   }
   const { n: productCount } = db.prepare('SELECT COUNT(*) AS n FROM products').get();
   if (!productCount) {

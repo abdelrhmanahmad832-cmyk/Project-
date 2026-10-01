@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
-import { api, formatPrice, STATUS_LABELS } from '../api.js';
+import { Link } from 'react-router-dom';
+import { api, formatPrice, formatDate, STATUS_LABELS, PAYMENT_STATUS_LABELS } from '../api.js';
 
 export default function MyOrders() {
   const [orders, setOrders] = useState(null);
   const [error, setError] = useState('');
-  const location = useLocation();
 
   useEffect(() => {
     api('/orders/mine').then(setOrders).catch((e) => setError(e.message));
@@ -17,20 +16,25 @@ export default function MyOrders() {
   return (
     <>
       <h2>طلباتي</h2>
-      {location.state?.placed && <p className="success">تم استلام طلبك بنجاح! 🎉</p>}
-      {!orders.length && <p className="muted">لا توجد طلبات بعد.</p>}
+      {!orders.length && (
+        <div className="center">
+          <p className="muted">لا توجد طلبات بعد.</p>
+          <Link to="/" className="btn">ابدأ التسوق</Link>
+        </div>
+      )}
       {orders.map((o) => (
-        <div key={o.id} className="card pad order">
+        <Link key={o.id} to={`/orders/${o.id}`} className="card pad order order-link">
           <div className="order-head">
             <strong>طلب #{o.id}</strong>
             <span className={`status status-${o.status}`}>{STATUS_LABELS[o.status]}</span>
-            <span className="muted">{new Date(o.created_at + 'Z').toLocaleString('ar-EG')}</span>
+            {o.payment_method === 'card' && (
+              <span className={`status pay-${o.payment_status}`}>{PAYMENT_STATUS_LABELS[o.payment_status]}</span>
+            )}
+            <span className="muted small">{formatDate(o.created_at)}</span>
           </div>
-          <ul>
-            {o.items.map((i) => <li key={i.id}>{i.product_name} × {i.quantity} — {formatPrice(i.unit_price * i.quantity)}</li>)}
-          </ul>
-          <strong>الإجمالي: {formatPrice(o.total)}</strong>
-        </div>
+          <p className="muted">{o.items.map((i) => `${i.product_name} × ${i.quantity}`).join('، ')}</p>
+          <strong>{formatPrice(o.total)}</strong>
+        </Link>
       ))}
     </>
   );

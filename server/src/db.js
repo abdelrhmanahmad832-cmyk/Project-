@@ -1,12 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { DB_PATH } from './config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'store.db');
-
-export const db = new DatabaseSync(dbPath);
-db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
+export const db = new DatabaseSync(DB_PATH);
+db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -48,10 +44,60 @@ db.exec(`
     unit_price REAL NOT NULL,
     quantity INTEGER NOT NULL CHECK (quantity > 0)
   );
+
+  CREATE TABLE IF NOT EXISTS coupons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    type TEXT NOT NULL CHECK (type IN ('percent', 'fixed')),
+    value REAL NOT NULL CHECK (value > 0),
+    min_total REAL NOT NULL DEFAULT 0,
+    max_uses INTEGER,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (product_id, user_id)
+  );
+`);
+
+// Additive migrations for databases created by earlier versions.
+function addColumns(table, columns) {
+  const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  for (const [name, def] of Object.entries(columns)) {
+    if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+  }
+}
+addColumns('users', { phone: "TEXT NOT NULL DEFAULT ''", address: "TEXT NOT NULL DEFAULT ''" });
+addColumns('orders', {
+  subtotal: 'REAL',
+  discount: 'REAL NOT NULL DEFAULT 0',
+  shipping: 'REAL NOT NULL DEFAULT 0',
+  coupon_code: 'TEXT',
+  payment_method: "TEXT NOT NULL DEFAULT 'cod'",
+  payment_status: "TEXT NOT NULL DEFAULT 'unpaid'",
+  stripe_session_id: 'TEXT',
+  stripe_payment_intent: 'TEXT',
+  paid_at: 'TEXT',
+});
+db.exec(`
+  UPDATE orders SET subtotal = total WHERE subtotal IS NULL;
+  CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+  CREATE INDEX IF NOT EXISTS idx_orders_session ON orders(stripe_session_id);
+  CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id);
+  CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id);
 `);
 
 export function transaction(fn) {
-  db.exec('BEGIN');
+  db.exec('BEGIN IMMEDIATE');
   try {
     const result = fn();
     db.exec('COMMIT');
@@ -59,5 +105,12 @@ export function transaction(fn) {
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
+  }
+}
+
+export class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
   }
 }
