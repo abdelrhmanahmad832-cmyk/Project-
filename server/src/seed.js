@@ -1,0 +1,38 @@
+import bcrypt from 'bcryptjs';
+import { db } from './db.js';
+import { fileURLToPath } from 'node:url';
+
+const products = [
+  ['سماعات لاسلكية', 'سماعات بلوتوث بعزل ضوضاء وبطارية تدوم 30 ساعة.', 1450, 25, 'إلكترونيات', 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600'],
+  ['ساعة ذكية', 'تتبع اللياقة ونبض القلب مع شاشة AMOLED.', 2300, 15, 'إلكترونيات', 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600'],
+  ['كاميرا فورية', 'كاميرا تطبع الصور فوراً بألوان زاهية.', 3100, 8, 'إلكترونيات', 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=600'],
+  ['حذاء رياضي', 'حذاء خفيف ومريح للجري والاستخدام اليومي.', 1200, 40, 'أزياء', 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=600'],
+  ['حقيبة ظهر', 'حقيبة مقاومة للماء مع جيب للابتوب 15 بوصة.', 850, 30, 'أزياء', 'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=600'],
+  ['نظارة شمسية', 'حماية كاملة من الأشعة فوق البنفسجية بتصميم كلاسيكي.', 650, 50, 'أزياء', 'https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=600'],
+  ['كوب قهوة سيراميك', 'كوب يدوي الصنع بسعة 350 مل.', 180, 100, 'المنزل', 'https://images.unsplash.com/photo-1514228742587-6b1558fcca3d?w=600'],
+  ['نبتة منزلية', 'نبتة داخلية سهلة العناية مع أصيص أنيق.', 320, 20, 'المنزل', 'https://images.unsplash.com/photo-1485955900006-10f4d324d411?w=600'],
+];
+
+export function seedIfEmpty() {
+  const { n: userCount } = db.prepare('SELECT COUNT(*) AS n FROM users').get();
+  if (!userCount) {
+    const email = process.env.ADMIN_EMAIL || 'admin@store.com';
+    const password = process.env.ADMIN_PASSWORD || 'admin123';
+    db.prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'admin')").run(
+      'المدير',
+      email,
+      bcrypt.hashSync(password, 10)
+    );
+    console.log(`تم إنشاء حساب المدير: ${email} / ${password}`);
+  }
+  const { n: productCount } = db.prepare('SELECT COUNT(*) AS n FROM products').get();
+  if (!productCount) {
+    const insert = db.prepare(
+      'INSERT INTO products (name, description, price, stock, category, image_url) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    for (const p of products) insert.run(...p);
+    console.log(`تمت إضافة ${products.length} منتجات تجريبية`);
+  }
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) seedIfEmpty();
