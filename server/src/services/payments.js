@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { db } from '../db.js';
+import { pool, all, one } from '../db.js';
 import { config } from '../config.js';
 import { cancelOrderInDb, getOrder } from './orders.js';
 
@@ -43,7 +43,7 @@ export async function createCheckoutSession(order, baseUrl, customerEmail) {
     success_url: `${baseUrl}/orders/${order.id}?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${baseUrl}/orders/${order.id}?canceled=1`,
   });
-  db.prepare('UPDATE orders SET stripe_session_id = ? WHERE id = ?').run(session.id, order.id);
+  await pool.query('UPDATE orders SET stripe_session_id = $1 WHERE id = $2', [session.id, order.id]);
   return session.url;
 }
 
@@ -53,19 +53,20 @@ export async function syncCheckoutSession(sessionOrId) {
   const session =
     typeof sessionOrId === 'string' ? await stripe.checkout.sessions.retrieve(sessionOrId) : sessionOrId;
   const orderId = Number(session.metadata?.order_id);
-  const order = orderId && db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+  const order = Number.isInteger(orderId) && orderId > 0 && (await one('SELECT * FROM orders WHERE id = $1', [orderId]));
   if (!order || order.payment_method !== 'card') return null;
 
   if (session.payment_status === 'paid' && order.payment_status === 'unpaid') {
     const paymentIntent = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id;
-    db.prepare(
-      `UPDATE orders SET payment_status = 'paid', paid_at = datetime('now'), stripe_payment_intent = ?
-       WHERE id = ? AND payment_status = 'unpaid'`
-    ).run(paymentIntent ?? null, order.id);
-    if (order.status === 'cancelled') {
+    const updated = await one(
+      `UPDATE orders SET payment_status = 'paid', paid_at = now(), stripe_payment_intent = $1
+       WHERE id = $2 AND payment_status = 'unpaid' RETURNING status`,
+      [paymentIntent ?? null, order.id]
+    );
+    if (updated?.status === 'cancelled') {
       // Paid after the order was cancelled (race with the expiry sweep) — give the money back.
       await refundOrder({ ...order, stripe_payment_intent: paymentIntent });
-      db.prepare("UPDATE orders SET payment_status = 'refunded' WHERE id = ?").run(order.id);
+      await pool.query("UPDATE orders SET payment_status = 'refunded' WHERE id = $1", [order.id]);
     }
   } else if (
     session.status === 'expired' &&
@@ -73,7 +74,7 @@ export async function syncCheckoutSession(sessionOrId) {
     order.status !== 'cancelled' &&
     session.id === order.stripe_session_id
   ) {
-    cancelOrderInDb(order.id);
+    await cancelOrderInDb(order.id);
   }
   return getOrder(order.id);
 }
@@ -86,16 +87,14 @@ export async function refundOrder(order) {
 // Catches payments whose webhook never arrived and frees stock held by abandoned card orders.
 export async function reconcilePendingPayments() {
   if (!stripe) return;
-  const pending = db
-    .prepare(
-      `SELECT * FROM orders WHERE payment_method = 'card' AND payment_status = 'unpaid' AND status != 'cancelled'
-       AND created_at < datetime('now', '-5 minutes')`
-    )
-    .all();
+  const pending = await all(
+    `SELECT * FROM orders WHERE payment_method = 'card' AND payment_status = 'unpaid' AND status != 'cancelled'
+     AND created_at < now() - interval '5 minutes'`
+  );
   for (const order of pending) {
     try {
       if (order.stripe_session_id) await syncCheckoutSession(order.stripe_session_id);
-      else if (new Date(order.created_at + 'Z') < Date.now() - SESSION_TTL_SECONDS * 1000) cancelOrderInDb(order.id);
+      else if (order.created_at < Date.now() - SESSION_TTL_SECONDS * 1000) await cancelOrderInDb(order.id);
     } catch (err) {
       console.error(`تعذر مزامنة الدفع للطلب ${order.id}:`, err.message);
     }

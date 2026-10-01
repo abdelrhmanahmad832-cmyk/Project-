@@ -1,7 +1,4 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { db } from '../db.js';
-import { UPLOAD_DIR } from '../config.js';
+import { pool, one } from '../db.js';
 
 const SIGNATURES = {
   'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
@@ -12,22 +9,11 @@ const SIGNATURES = {
 export const EXTENSIONS = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp' };
 
 // Checks the file's actual bytes, not just the client-declared type.
-export function hasValidImageSignature(filePath, mimetype) {
-  const fd = fs.openSync(filePath, 'r');
-  try {
-    const buf = Buffer.alloc(12);
-    fs.readSync(fd, buf, 0, 12, 0);
-    return !!SIGNATURES[mimetype]?.(buf);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
+export const hasValidImageSignature = (buffer, mimetype) => buffer.length >= 12 && !!SIGNATURES[mimetype]?.(buffer);
 
-// Deletes a locally uploaded image once no product references it.
-export function removeUploadIfUnused(url) {
+// Deletes an uploaded image once no product references it.
+export async function removeUploadIfUnused(url) {
   if (!url?.startsWith('/uploads/')) return;
-  const { n } = db.prepare('SELECT COUNT(*) AS n FROM products WHERE image_url = ?').get(url);
-  if (n) return;
-  const file = path.join(UPLOAD_DIR, path.basename(url));
-  fs.rm(file, { force: true }, () => {});
+  const { n } = await one('SELECT COUNT(*) AS n FROM products WHERE image_url = $1', [url]);
+  if (!n) await pool.query('DELETE FROM images WHERE key = $1', [url.slice('/uploads/'.length)]);
 }

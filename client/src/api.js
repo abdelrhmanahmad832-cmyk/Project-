@@ -31,7 +31,7 @@ export const setCurrency = (c) => (currency = c);
 export const formatPrice = (n) =>
   new Intl.NumberFormat('ar-EG', { style: 'currency', currency, maximumFractionDigits: 2 }).format(n);
 
-export const formatDate = (s) => new Date(s.replace(' ', 'T') + 'Z').toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' });
+export const formatDate = (s) => new Date(s).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' });
 
 export const PLACEHOLDER_IMG =
   'data:image/svg+xml,' +

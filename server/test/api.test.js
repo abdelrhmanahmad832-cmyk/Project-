@@ -1,15 +1,15 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import Stripe from 'stripe';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'souq-test-'));
+// Tests wipe and recreate the schema, so they need their own database.
+if (!process.env.TEST_DATABASE_URL) {
+  console.error('Set TEST_DATABASE_URL to an empty PostgreSQL database to run the tests.');
+  process.exit(1);
+}
 Object.assign(process.env, {
   NODE_ENV: 'test',
-  DB_PATH: path.join(tmp, 'test.db'),
-  UPLOAD_DIR: path.join(tmp, 'uploads'),
+  DATABASE_URL: process.env.TEST_DATABASE_URL,
   STRIPE_WEBHOOK_SECRET: 'whsec_test',
   SHIPPING_FEE: '50',
   FREE_SHIPPING_MIN: '1000',
@@ -18,7 +18,7 @@ Object.assign(process.env, {
 const { app } = await import('../src/app.js');
 const { seedIfEmpty } = await import('../src/seed.js');
 const { setStripeClient, reconcilePendingPayments } = await import('../src/services/payments.js');
-const { db } = await import('../src/db.js');
+const { pool, one, initDb } = await import('../src/db.js');
 
 // Minimal in-memory stand-in for the Stripe API.
 const sessions = new Map();
@@ -56,11 +56,13 @@ async function call(method, url, { token, body, form, headers = {} } = {}) {
   try { data = JSON.parse(text); } catch { data = text; }
   return { status: res.status, data };
 }
-const stock = (id) => db.prepare('SELECT stock FROM products WHERE id = ?').get(id).stock;
-const backdate = (orderId) => db.prepare("UPDATE orders SET created_at = datetime('now', '-10 minutes') WHERE id = ?").run(orderId);
+const stock = async (id) => (await one('SELECT stock FROM products WHERE id = $1', [id])).stock;
+const backdate = (orderId) => pool.query("UPDATE orders SET created_at = now() - interval '10 minutes' WHERE id = $1", [orderId]);
 
 before(async () => {
-  seedIfEmpty();
+  await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  await initDb();
+  await seedIfEmpty();
   server = app.listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -68,9 +70,9 @@ before(async () => {
   alice = (await call('POST', '/api/auth/register', { body: { name: 'Alice', email: 'alice@x.com', password: 'secret1' } })).data.token;
   bob = (await call('POST', '/api/auth/register', { body: { name: 'Bob', email: 'bob@x.com', password: 'secret1' } })).data.token;
 });
-after(() => {
+after(async () => {
   server.close();
-  fs.rmSync(tmp, { recursive: true, force: true });
+  await pool.end();
 });
 
 test('config exposes store settings and card availability', async () => {
@@ -134,11 +136,12 @@ test('image upload: validates type and content, cleans up replaced files', async
 
   const prod = await call('POST', '/api/products', { token: admin, body: { name: 'With image', price: 10, stock: 1, image_url: up.data.url } });
   assert.equal(prod.status, 201);
-  const file = path.join(process.env.UPLOAD_DIR, path.basename(up.data.url));
-  assert.ok(fs.existsSync(file));
+  const key = up.data.url.slice('/uploads/'.length);
+  const imageCount = async () => (await one('SELECT COUNT(*) AS n FROM images WHERE key = $1', [key])).n;
+  assert.equal(await imageCount(), 1);
   await call('PUT', `/api/products/${prod.data.id}`, { token: admin, body: { image_url: 'https://example.com/x.jpg' } });
-  await new Promise((r) => setTimeout(r, 50));
-  assert.ok(!fs.existsSync(file), 'old upload should be removed');
+  assert.equal(await imageCount(), 0, 'old upload should be removed');
+  assert.equal((await fetch(base + up.data.url)).status, 404);
 
   assert.equal((await call('POST', '/api/products', { token: admin, body: { name: 'x', price: 1, image_url: 'javascript:alert(1)' } })).status, 400);
   await call('DELETE', `/api/products/${prod.data.id}`, { token: admin });
@@ -171,14 +174,14 @@ test('coupons: discount applied, usage limit enforced, released on cancel', asyn
   assert.match(again.data.error, /استهلاك/);
 
   await call('POST', `/api/orders/${order.data.order.id}/cancel`, { token: bob });
-  assert.equal(db.prepare("SELECT used_count FROM coupons WHERE code = 'SAVE10'").get().used_count, 0);
+  assert.equal((await one("SELECT used_count FROM coupons WHERE code = 'SAVE10'")).used_count, 0);
   await call('PATCH', `/api/coupons/${c.data.id}`, { token: admin, body: { active: false } });
   const off = await call('POST', '/api/orders/quote', { token: bob, body: { items, couponCode: 'SAVE10' } });
   assert.ok(off.data.couponError);
 });
 
 test('cash on delivery: stock, ownership, cancel rules, delivered marks paid', async () => {
-  const before = stock(1);
+  const before = (await stock(1));
   const { data } = await call('POST', '/api/orders', {
     token: bob,
     body: { items: [{ productId: 1, quantity: 1 }, { productId: 1, quantity: 1 }], address: 'A', phone: '1' },
@@ -186,7 +189,7 @@ test('cash on delivery: stock, ownership, cancel rules, delivered marks paid', a
   const id = data.order.id;
   assert.equal(data.checkoutUrl, null);
   assert.equal(data.order.items.length, 1, 'duplicate lines are merged');
-  assert.equal(stock(1), before - 2);
+  assert.equal((await stock(1)), before - 2);
 
   assert.equal((await call('GET', `/api/orders/${id}`, { token: alice })).status, 404, 'other users cannot see it');
   assert.equal((await call('POST', `/api/orders/${id}/cancel`, { token: alice })).status, 404);
@@ -200,10 +203,10 @@ test('cash on delivery: stock, ownership, cancel rules, delivered marks paid', a
   assert.equal(delivered.data.payment_status, 'paid');
 
   const o2 = (await call('POST', '/api/orders', { token: bob, body: { items: [{ productId: 1, quantity: 3 }], address: 'A', phone: '1' } })).data.order;
-  const s = stock(1);
+  const s = (await stock(1));
   const cancelled = await call('POST', `/api/orders/${o2.id}/cancel`, { token: bob });
   assert.equal(cancelled.data.status, 'cancelled');
-  assert.equal(stock(1), s + 3);
+  assert.equal((await stock(1)), s + 3);
   assert.equal((await call('PATCH', `/api/orders/${o2.id}/status`, { token: admin, body: { status: 'pending' } })).status, 400);
 });
 
@@ -261,18 +264,18 @@ test('card payment: signed webhook marks paid, bad signature rejected', async ()
 });
 
 test('card payment: abandoned session expires and releases stock', async () => {
-  const s = stock(6);
+  const s = (await stock(6));
   const { order } = (await call('POST', '/api/orders', {
     token: alice,
     body: { items: [{ productId: 6, quantity: 2 }], address: 'A', phone: '1', paymentMethod: 'card' },
   })).data;
-  assert.equal(stock(6), s - 2);
+  assert.equal((await stock(6)), s - 2);
   sessions.get(order.stripe_session_id).status = 'expired';
   backdate(order.id);
   await reconcilePendingPayments();
   const after = (await call('GET', `/api/orders/${order.id}`, { token: alice })).data;
   assert.equal(after.status, 'cancelled');
-  assert.equal(stock(6), s);
+  assert.equal((await stock(6)), s);
 });
 
 test('card payment: customer cancels unpaid order, session is closed', async () => {
@@ -314,4 +317,18 @@ test('users: admin can promote others but not change own role; stats', async () 
   const stats = (await call('GET', '/api/orders/stats', { token: admin })).data;
   assert.ok(stats.revenue > 0);
   assert.equal(stats.customers, 2);
+});
+
+test('concurrency: two simultaneous orders for the last unit — only one wins', async () => {
+  const { data: p } = await call('POST', '/api/products', { token: admin, body: { name: 'Last one', price: 100, stock: 1 } });
+  const body = { items: [{ productId: p.id, quantity: 1 }], address: 'A', phone: '1' };
+  const results = await Promise.all([call('POST', '/api/orders', { token: alice, body }), call('POST', '/api/orders', { token: bob, body })]);
+  assert.deepEqual(results.map((r) => r.status).sort(), [201, 400]);
+  assert.equal(await stock(p.id), 0);
+});
+
+test('coupons: expired code is rejected', async () => {
+  await call('POST', '/api/coupons', { token: admin, body: { code: 'OLD', type: 'fixed', value: 5, expires_at: '2020-01-01' } });
+  const q = await call('POST', '/api/orders/quote', { token: bob, body: { items: [{ productId: 7, quantity: 1 }], couponCode: 'old' } });
+  assert.equal(q.data.couponError, 'كود الخصم منتهي الصلاحية');
 });

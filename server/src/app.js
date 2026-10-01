@@ -3,14 +3,14 @@ import helmet from 'helmet';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { config, UPLOAD_DIR } from './config.js';
+import { config } from './config.js';
 import { cardPaymentsEnabled } from './services/payments.js';
 import authRoutes from './routes/auth.js';
 import productRoutes from './routes/products.js';
 import orderRoutes from './routes/orders.js';
 import couponRoutes from './routes/coupons.js';
 import userRoutes from './routes/users.js';
-import uploadRoutes from './routes/uploads.js';
+import { uploadRoutes, serveUploads } from './routes/uploads.js';
 import paymentRoutes from './routes/payments.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,7 +52,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'المسار غير موجود' }));
 
-app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
+app.use('/uploads', serveUploads);
 
 // In production, serve the built React app.
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');

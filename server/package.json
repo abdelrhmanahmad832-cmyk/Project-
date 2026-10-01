@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --disable-warning=ExperimentalWarning --watch src/index.js",
-    "start": "NODE_ENV=production node --disable-warning=ExperimentalWarning src/index.js",
-    "seed": "node --disable-warning=ExperimentalWarning src/seed.js",
-    "test": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/*.test.js"
+    "dev": "node --watch src/index.js",
+    "start": "NODE_ENV=production node src/index.js",
+    "seed": "node src/seed.js",
+    "test": "NODE_ENV=test node --test test/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
@@ -19,6 +19,6 @@
     "stripe": "^23.0.0"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=20.12"
   }
 }
